@@ -1,81 +1,98 @@
+# data_pipeline.py
 import pandas as pd
 import numpy as np
-import seaborn as sns
 import matplotlib.pyplot as plt
+import seaborn as sns
 from sklearn.preprocessing import MinMaxScaler
-import os
+from datetime import datetime
+import logging
 
-# Load dataset
-def load_data(file_path="creditcard.csv"):
-    df = pd.read_csv(file_path)
-    return df
+# Setup logging
+logging.basicConfig(filename="data_pipeline.log", level=logging.INFO,
+                    format="%(asctime)s - %(levelname)s - %(message)s")
 
-# Preprocessing
-def preprocess_data(df):
-    # Summary stats
-    summary = df.describe()
-    
-    # Missing values
-    missing = df.isnull().sum()
-    
-    # Impute missing numeric data
-    numeric_cols = df.select_dtypes(include=np.number).columns
-    for col in numeric_cols:
-        df[col].fillna(df[col].median(), inplace=True)
-    
-    # Data types
-    dtypes = df.dtypes
-    
-    # Normalization
-    scaler = MinMaxScaler()
-    df[numeric_cols] = scaler.fit_transform(df[numeric_cols])
-    
-    return df, summary, missing, dtypes
+def run_pipeline(df: pd.DataFrame):
+    result = {}
+    try:
+        df = df.copy()
+        logging.info("=== DataOps Pipeline started ===")
 
-# EDA
-def perform_eda(df):
-    correlation = df.corr()
-    
-    # Univariate plots
-    for col in df.select_dtypes(include=np.number).columns:
-        plt.figure(figsize=(6,4))
-        sns.histplot(df[col], kde=True)
-        plt.title(f"Distribution of {col}")
+        # 1️⃣ Summary statistics
+        summary = df.describe().transpose()
+        result["summary"] = summary.to_dict()
+        logging.info("Summary statistics computed.")
+
+        # 2️⃣ Missing values
+        missing = df.isnull().sum().to_dict()
+        result["missing"] = missing
+        logging.info("Missing values checked.")
+
+        # 3️⃣ Data types
+        result["dtypes"] = df.dtypes.apply(str).to_dict()
+
+        # 4️⃣ Normalization
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        scaler = MinMaxScaler()
+        df[numeric_cols] = scaler.fit_transform(df[numeric_cols])
+        logging.info("Data normalized.")
+
+        # 5️⃣ Univariate plots
+        plt.figure(figsize=(10,6))
+        df[numeric_cols].hist(bins=30, figsize=(12,8))
         plt.tight_layout()
-        plt.savefig(f"univariate_{col}.png")
+        plt.savefig("univariate_plot.png")
         plt.close()
-    
-    # Bivariate plots (top 5 correlated features)
-    corr_target = correlation['Class'].abs().sort_values(ascending=False)[1:6]
-    for col in corr_target.index:
-        plt.figure(figsize=(6,4))
-        sns.scatterplot(x=df[col], y=df['Class'])
-        plt.title(f"{col} vs Class")
-        plt.tight_layout()
-        plt.savefig(f"bivariate_{col}.png")
-        plt.close()
-    
-    # Fraud vs Non-Fraud
-    plt.figure(figsize=(6,4))
-    sns.countplot(x='Class', data=df)
-    plt.title("Fraud vs Non-Fraud Transactions")
-    plt.tight_layout()
-    plt.savefig("fraud_vs_nonfraud.png")
-    plt.close()
-    
-    return correlation
 
-# DataOps workflow
-def run_dataops_pipeline():
-    df = load_data()
-    df, summary, missing, dtypes = preprocess_data(df)
-    correlation = perform_eda(df)
-    
-    log = f"""
-    DataOps Pipeline Run:
-    - Shape: {df.shape}
-    - Summary Stats: {summary.head().to_dict()}
-    - Missing Values: {missing.to_dict()}
-    - Data Types: {dtypes.to_dict()}
-    """
-    return df, log
+        # 6️⃣ Bivariate plot (correlation heatmap)
+        plt.figure(figsize=(10,8))
+        sns.heatmap(df[numeric_cols].corr(), annot=True, cmap="coolwarm")
+        plt.tight_layout()
+        plt.savefig("bivariate_plot.png")
+        plt.close()
+
+        # 7️⃣ Class distribution (Fraud vs Non-Fraud)
+        if "Class" in df.columns:
+            plt.figure(figsize=(6,4))
+            sns.countplot(x="Class", data=df)
+            plt.title("Fraud vs Non-Fraud")
+            plt.savefig("class_distribution.png")
+            plt.close()
+
+        # 8️⃣ Feature importance (simple correlation with target)
+        if "Class" in df.columns:
+            corr_with_target = df.corr()["Class"].drop("Class").sort_values(ascending=False)
+            plt.figure(figsize=(10,4))
+            sns.barplot(x=corr_with_target.index, y=corr_with_target.values)
+            plt.title("Feature Importance (Correlation with Class)")
+            plt.xticks(rotation=45)
+            plt.tight_layout()
+            plt.savefig("feature_importance.png")
+            plt.close()
+
+        # 9️⃣ Correlation heatmap saved separately
+        plt.figure(figsize=(10,8))
+        sns.heatmap(df.corr(), annot=True, cmap="coolwarm")
+        plt.tight_layout()
+        plt.savefig("correlation_heatmap.png")
+        plt.close()
+
+        # 10️⃣ Logging
+        try:
+            with open("data_pipeline.log", "r") as f:
+                result["logs"] = f.read()[-5000:]
+        except:
+            result["logs"] = ""
+
+        result["run_ts"] = datetime.now().isoformat()
+        logging.info("=== DataOps Pipeline completed ===")
+        return result
+
+    except Exception as e:
+        logging.exception("DataOps pipeline failed.")
+        result["error"] = str(e)
+        try:
+            with open("data_pipeline.log", "r") as f:
+                result["logs"] = f.read()[-5000:]
+        except:
+            result["logs"] = ""
+        return result

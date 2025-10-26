@@ -1,47 +1,55 @@
+# app.py
 import streamlit as st
-import time
-from data_pipeline import run_dataops_pipeline
-from ml_pipeline import load_preprocessed_data, train_models
-from PIL import Image
-import os
+import pandas as pd
+from pathlib import Path
+from data_pipeline import run_pipeline
 
-st.set_page_config(page_title="Credit Card Fraud DataOps & MLOps", layout="wide")
 
-st.title("Credit Card Fraud Detection Dashboard")
+st.set_page_config(page_title="Data Pipeline Dashboard", layout="wide")
+st.title("📊 Automated Data Pipeline — Upload CSV")
 
-st.markdown("""
-This dashboard runs **DataOps Pipeline** (Sub-Objective 1) and **MLOps Pipeline** (Sub-Objective 2)
-with auto-refresh every 2 minutes.
-""")
+st.write("Upload a CSV file (e.g., creditcard.csv). The app will run preprocessing, EDA, log actions, and show visuals.")
 
-# Auto-refresh every 2 minutes
-st_autorefresh = st.experimental_rerun
+uploaded_file = st.file_uploader("Choose CSV file", type=["csv"])
 
-def display_images(pattern):
-    import glob
-    images = glob.glob(pattern)
-    for img_path in images:
-        image = Image.open(img_path)
-        st.image(image, caption=os.path.basename(img_path))
+if uploaded_file is not None:
+    try:
+        df = pd.read_csv(uploaded_file)
+    except Exception as e:
+        st.error(f"Error reading CSV: {e}")
+        st.stop()
 
-# DataOps pipeline button
-if st.button("Run DataOps Pipeline"):
-    with st.spinner("Running DataOps Pipeline..."):
-        df, log = run_dataops_pipeline()
-        st.success("DataOps Pipeline Completed!")
-        st.write(log)
-        display_images("univariate_*.png")
-        display_images("bivariate_*.png")
-        if os.path.exists("fraud_vs_nonfraud.png"):
-            st.image("fraud_vs_nonfraud.png", caption="Fraud vs Non-Fraud")
+    st.subheader("Dataset Preview")
+    st.write(f"Shape: {df.shape}")
+    st.dataframe(df.head())
 
-# MLOps pipeline button
-if st.button("Run MLOps Pipeline"):
-    with st.spinner("Running MLOps Pipeline..."):
-        df = load_preprocessed_data()
-        metrics_log = train_models(df)
-        st.success("MLOps Pipeline Completed!")
-        st.write(metrics_log)
+    if st.button("Run pipeline now"):
+        with st.spinner("Running pipeline..."):
+            out = run_pipeline(df)
+        if out.get("status") == "success":
+            st.success("Pipeline completed successfully")
+        else:
+            st.error("Pipeline failed - check logs")
 
-# Auto-refresh every 2 minutes
-st_autorefresh(interval=120000)  # 120000 ms = 2 minutes
+        st.subheader("Summary Statistics")
+        st.dataframe(out.get("summary"))
+
+        st.subheader("Missing Values")
+        st.json(out.get("missing"))
+
+        st.subheader("Data Types")
+        st.json(out.get("dtypes"))
+
+        st.subheader("Generated Plots")
+        for fn in ["class_distribution.png", "correlation_heatmap.png", "feature_importance.png"]:
+            if Path(fn).exists():
+                st.image(fn, use_column_width=True)
+            else:
+                st.info(f"{fn} not generated")
+
+        st.subheader("Pipeline Logs (tail)")
+        st.text_area("Logs", out.get("logs", ""), height=300)
+    else:
+        st.info("Click 'Run pipeline now' to execute preprocessing and EDA.")
+else:
+    st.info("Please upload a CSV to proceed.")
