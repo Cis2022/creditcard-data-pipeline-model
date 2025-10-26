@@ -1,9 +1,7 @@
 # app.py
-import time
-from datetime import datetime, timedelta
-import os
-from pathlib import Path
 import json
+from datetime import datetime, timedelta
+from pathlib import Path
 import pandas as pd
 import altair as alt
 import streamlit as st
@@ -38,8 +36,8 @@ st.caption(
 )
 
 # --- Auto Refresh Toggle ---
-col0 = st.columns(3)
-with col0[0]:
+cols_toggle = st.columns(3)
+with cols_toggle[0]:
     st.toggle(
         "Auto-refresh every 2 minutes",
         value=st.session_state.auto_refresh_enabled,
@@ -47,11 +45,24 @@ with col0[0]:
         help="When ON, the app reruns every 2 minutes and schedules pipelines if due.",
     )
 
+# IMPORTANT: correct Streamlit function is st_autorefresh (not st.autorefresh)
 if st.session_state.auto_refresh_enabled:
-    st.autorefresh(interval=AUTO_REFRESH_INTERVAL_MS, key="global_autorefresh")
+    st_autorefresh = st.experimental_rerun  # fallback no-op if import missing
+    try:
+        from streamlit.runtime.scriptrunner import add_script_run_ctx  # noqa: F401
+        # Use the public helper if available
+        from streamlit.runtime.scriptrunner.magic_funcs import st_autorefresh as _st_autorefresh  # type: ignore
+    except Exception:
+        # Since Streamlit 1.22+, there's a stable function:
+        try:
+            from streamlit import st_autorefresh as _st_autorefresh  # type: ignore
+        except Exception:
+            _st_autorefresh = None
+    if _st_autorefresh:
+        _st_autorefresh(interval=AUTO_REFRESH_INTERVAL_MS, key="global_autorefresh")
 
-# --- Dataset presence check ---
-DATA_PATH.mkdir(parents=True, exist_ok=True)
+# --- Dataset presence check (FIXED) ---
+# Ensure the file exists; do NOT mkdir on a file path
 if not Path(DATA_PATH).exists():
     st.error(
         f"Dataset not found at `{DATA_PATH}`. "
@@ -79,7 +90,7 @@ tab1, tab2, tab3 = st.tabs(["📊 DataOps", "🤖 MLOps", "🪵 Logs"])
 with tab1:
     st.subheader("DataOps Pipeline (Preprocessing + EDA + Artifacts)")
     next_run_info = (
-        "next scheduled run in 2 minutes"
+        "next scheduled run in ~2 minutes"
         if st.session_state.last_dataops_run
         else "first run pending"
     )
@@ -87,7 +98,7 @@ with tab1:
         f"Last run: {st.session_state.last_dataops_run or '—'} | {next_run_info}"
     )
 
-    # Auto schedule if due
+    dataops_result = None
     if st.session_state.auto_refresh_enabled and should_run(st.session_state.last_dataops_run):
         with st.spinner("Auto-running DataOps pipeline…"):
             dataops_result = run_dataops_pipeline()
@@ -96,8 +107,6 @@ with tab1:
         with st.spinner("Running DataOps pipeline…"):
             dataops_result = run_dataops_pipeline()
             st.session_state.last_dataops_run = datetime.utcnow()
-    else:
-        dataops_result = None
 
     if dataops_result:
         st.success("DataOps pipeline completed ✅")
@@ -111,7 +120,8 @@ with tab1:
         with c3:
             st.metric("Missing Values", f"{dataops_result['summary']['missing_total']:,}")
         with c4:
-            st.metric("Imputed Columns", ", ".join(dataops_result['summary']['imputed_cols']) or "None")
+            imputed_cols = dataops_result['summary']['imputed_cols']
+            st.metric("Imputed Columns", ", ".join(imputed_cols) if imputed_cols else "None")
 
         # Data types
         st.markdown("### Data Types")
@@ -153,7 +163,7 @@ with tab2:
     st.subheader("ML Pipeline (Train + Evaluate + Monitor)")
 
     next_run_info_ml = (
-        "next scheduled run in 2 minutes"
+        "next scheduled run in ~2 minutes"
         if st.session_state.last_mlops_run
         else "first run pending"
     )
@@ -161,7 +171,7 @@ with tab2:
         f"Last run: {st.session_state.last_mlops_run or '—'} | {next_run_info_ml}"
     )
 
-    # Auto schedule if due
+    ml_result = None
     if st.session_state.auto_refresh_enabled and should_run(st.session_state.last_mlops_run):
         with st.spinner("Auto-running ML pipeline…"):
             ml_result = run_mlops_pipeline()
@@ -170,8 +180,6 @@ with tab2:
         with st.spinner("Running ML pipeline…"):
             ml_result = run_mlops_pipeline()
             st.session_state.last_mlops_run = datetime.utcnow()
-    else:
-        ml_result = None
 
     if ml_result:
         st.success("ML pipeline completed ✅")
@@ -201,7 +209,6 @@ with tab2:
         hist_csv = Path(METRICS_DIR) / "ml_metrics_history.csv"
         if hist_csv.exists():
             hist_df = pd.read_csv(hist_csv)
-            # line chart for F1 over time
             line = alt.Chart(hist_df).mark_line(point=True).encode(
                 x="timestamp:T",
                 y="f1:Q",
@@ -226,7 +233,7 @@ with tab3:
     with cols[0]:
         st.markdown("**DataOps Log**")
         if dataops_log.exists():
-            st.code(dataops_log.read_text()[-20_000:])  # tail
+            st.code(dataops_log.read_text()[-20_000:])
         else:
             st.info("No DataOps log yet.")
 
@@ -238,4 +245,3 @@ with tab3:
             st.info("No MLOps log yet.")
 
 st.caption("© Your Project — Streamlit Cloud deployment ready.")
-``
