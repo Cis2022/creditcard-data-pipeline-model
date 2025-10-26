@@ -1,9 +1,11 @@
 # app.py
 import json
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
-import pandas as pd
+
 import altair as alt
+import pandas as pd
 import streamlit as st
 
 # Local modules
@@ -18,51 +20,49 @@ st.set_page_config(
 )
 
 # --- Constants ---
-AUTO_REFRESH_INTERVAL_MS = 120_000  # 2 minutes
+AUTO_REFRESH_SECONDS = 120  # 2 minutes
 
 # --- Session State Initialization ---
-if "last_dataops_run" not in st.session_state:
-    st.session_state.last_dataops_run = None
-if "last_mlops_run" not in st.session_state:
-    st.session_state.last_mlops_run = None
-if "auto_refresh_enabled" not in st.session_state:
-    st.session_state.auto_refresh_enabled = True  # default ON
+ss = st.session_state
+ss.setdefault("last_dataops_run", None)      # UTC datetime or None
+ss.setdefault("last_mlops_run", None)        # UTC datetime or None
+ss.setdefault("auto_refresh_enabled", True)  # toggle
+ss.setdefault("last_refresh_epoch", 0.0)     # for safe refresh loop control
 
 # --- Header ---
 st.title("💳 Credit Card Fraud — Data & ML Pipelines")
 st.caption(
     "Two pipelines: DataOps (EDA & preprocessing) and MLOps (model training & monitoring). "
-    "Runs auto every 2 minutes (toggle below)."
+    "Auto-schedules every 2 minutes when enabled."
 )
 
-# --- Auto Refresh Toggle ---
+# --- Auto-Refresh Toggle ---
 cols_toggle = st.columns(3)
 with cols_toggle[0]:
     st.toggle(
         "Auto-refresh every 2 minutes",
-        value=st.session_state.auto_refresh_enabled,
+        value=ss.auto_refresh_enabled,
         key="auto_refresh_enabled",
-        help="When ON, the app reruns every 2 minutes and schedules pipelines if due.",
+        help="When ON, the app re-runs itself roughly every 2 minutes and triggers pipelines if due.",
     )
 
-# IMPORTANT: correct Streamlit function is st_autorefresh (not st.autorefresh)
-if st.session_state.auto_refresh_enabled:
-    st_autorefresh = st.experimental_rerun  # fallback no-op if import missing
-    try:
-        from streamlit.runtime.scriptrunner import add_script_run_ctx  # noqa: F401
-        # Use the public helper if available
-        from streamlit.runtime.scriptrunner.magic_funcs import st_autorefresh as _st_autorefresh  # type: ignore
-    except Exception:
-        # Since Streamlit 1.22+, there's a stable function:
-        try:
-            from streamlit import st_autorefresh as _st_autorefresh  # type: ignore
-        except Exception:
-            _st_autorefresh = None
-    if _st_autorefresh:
-        _st_autorefresh(interval=AUTO_REFRESH_INTERVAL_MS, key="global_autorefresh")
+# --- Minimal, safe auto-refresh (no hidden/internal APIs) ---
+# This avoids st_autorefresh compatibility issues in Cloud.
+def maybe_autorefresh(every_seconds: int = 120):
+    if not ss.auto_refresh_enabled:
+        return
+    now = time.time()
+    # Only trigger rerun if the last refresh was older than the interval
+    if now - ss.last_refresh_epoch >= every_seconds:
+        ss.last_refresh_epoch = now
+        # This will re-run the script; because we update last_refresh_epoch first,
+        # it won't loop infinitely.
+        st.experimental_rerun()
 
-# --- Dataset presence check (FIXED) ---
-# Ensure the file exists; do NOT mkdir on a file path
+# Call the auto-refresh mechanism early to keep the app responsive
+maybe_autorefresh(AUTO_REFRESH_SECONDS)
+
+# --- Dataset presence check ---
 if not Path(DATA_PATH).exists():
     st.error(
         f"Dataset not found at `{DATA_PATH}`. "
@@ -91,22 +91,22 @@ with tab1:
     st.subheader("DataOps Pipeline (Preprocessing + EDA + Artifacts)")
     next_run_info = (
         "next scheduled run in ~2 minutes"
-        if st.session_state.last_dataops_run
-        else "first run pending"
+        if ss.last_dataops_run else "first run pending"
     )
-    st.caption(
-        f"Last run: {st.session_state.last_dataops_run or '—'} | {next_run_info}"
-    )
+    st.caption(f"Last run (UTC): {ss.last_dataops_run or '—'} | {next_run_info}")
 
     dataops_result = None
-    if st.session_state.auto_refresh_enabled and should_run(st.session_state.last_dataops_run):
-        with st.spinner("Auto-running DataOps pipeline…"):
-            dataops_result = run_dataops_pipeline()
-            st.session_state.last_dataops_run = datetime.utcnow()
-    elif run_dataops_click:
-        with st.spinner("Running DataOps pipeline…"):
-            dataops_result = run_dataops_pipeline()
-            st.session_state.last_dataops_run = datetime.utcnow()
+    try:
+        if ss.auto_refresh_enabled and should_run(ss.last_dataops_run):
+            with st.spinner("Auto-running DataOps pipeline…"):
+                dataops_result = run_dataops_pipeline()
+                ss.last_dataops_run = datetime.utcnow()
+        elif run_dataops_click:
+            with st.spinner("Running DataOps pipeline…"):
+                dataops_result = run_dataops_pipeline()
+                ss.last_dataops_run = datetime.utcnow()
+    except Exception as e:
+        st.error(f"DataOps pipeline failed: {e}")
 
     if dataops_result:
         st.success("DataOps pipeline completed ✅")
@@ -161,25 +161,24 @@ with tab1:
 # =========================
 with tab2:
     st.subheader("ML Pipeline (Train + Evaluate + Monitor)")
-
     next_run_info_ml = (
         "next scheduled run in ~2 minutes"
-        if st.session_state.last_mlops_run
-        else "first run pending"
+        if ss.last_mlops_run else "first run pending"
     )
-    st.caption(
-        f"Last run: {st.session_state.last_mlops_run or '—'} | {next_run_info_ml}"
-    )
+    st.caption(f"Last run (UTC): {ss.last_mlops_run or '—'} | {next_run_info_ml}")
 
     ml_result = None
-    if st.session_state.auto_refresh_enabled and should_run(st.session_state.last_mlops_run):
-        with st.spinner("Auto-running ML pipeline…"):
-            ml_result = run_mlops_pipeline()
-            st.session_state.last_mlops_run = datetime.utcnow()
-    elif run_mlops_click:
-        with st.spinner("Running ML pipeline…"):
-            ml_result = run_mlops_pipeline()
-            st.session_state.last_mlops_run = datetime.utcnow()
+    try:
+        if ss.auto_refresh_enabled and should_run(ss.last_mlops_run):
+            with st.spinner("Auto-running ML pipeline…"):
+                ml_result = run_mlops_pipeline()
+                ss.last_mlops_run = datetime.utcnow()
+        elif run_mlops_click:
+            with st.spinner("Running ML pipeline…"):
+                ml_result = run_mlops_pipeline()
+                ss.last_mlops_run = datetime.utcnow()
+    except Exception as e:
+        st.error(f"ML pipeline failed: {e}")
 
     if ml_result:
         st.success("ML pipeline completed ✅")
