@@ -1,41 +1,41 @@
 """
-app.py
-Streamlit front-end for Credit Card Fraud DataOps + ML Pipeline Dashboard
-Features:
-- Two independent pipelines: DataOps & ML
-- Auto-refresh every 2 minutes
-- Upload CSV or use sample_data.csv
-- Displays summary, charts, logs, evaluation metrics, and insights
+Integrated DataOps + ML Pipeline Streamlit App
+Author: Prem Charan
 """
 
 import streamlit as st
 import pandas as pd
+import numpy as np
 from pathlib import Path
-from data_pipeline import run_pipeline
-from ml_pipeline import run_ml_pipeline
-from streamlit_autorefresh import st_autorefresh
 from datetime import datetime
 import os
-import platform
-import sys
+import logging
+import matplotlib.pyplot as plt
+import seaborn as sns
+from streamlit_autorefresh import st_autorefresh
+
+# Import pipelines
+from data_pipeline import run_pipeline
+from ml_pipeline import run_ml_pipeline
 
 # ---------- Auto-refresh configuration ----------
-st_autorefresh(interval=120000, limit=None, key="refresh")  # 2 minutes
+st_autorefresh(interval=120000, limit=None, key="refresh")  # every 2 minutes
 
 # ---------- Page config ----------
-st.set_page_config(page_title="Credit Card Fraud Dashboard", layout="wide")
-st.title("💳 Credit Card Fraud Dashboard")
-st.markdown("Automated DataOps & ML Pipeline with auto-refresh every 2 minutes")
+st.set_page_config(page_title="Credit Card Pipelines", layout="wide")
+st.title("💳 Credit Card Fraud Dashboard (DataOps + ML)")
 
-# ---------- Initialize session state ----------
-for key in ["is_processing_dataops", "is_processing_ml", "results_dataops", "results_ml",
-            "last_run_dataops", "last_run_ml"]:
-    if key not in st.session_state:
-        st.session_state[key] = None
+# ---------- Session state ----------
+if "last_run_dataops" not in st.session_state:
+    st.session_state["last_run_dataops"] = None
+if "last_run_ml" not in st.session_state:
+    st.session_state["last_run_ml"] = None
+if "is_processing" not in st.session_state:
+    st.session_state["is_processing"] = False
 
 # ---------- File upload ----------
-uploaded_file = st.file_uploader("📂 Choose CSV file (creditcard.csv)", type=["csv"])
-use_sample = st.checkbox("Use packaged sample dataset (for demo)", value=False)
+uploaded_file = st.file_uploader("📂 Upload CSV file", type=["csv"])
+use_sample = st.checkbox("Use packaged sample dataset", value=False)
 
 df = None
 if uploaded_file is not None:
@@ -50,91 +50,77 @@ elif use_sample:
         df = pd.read_csv(sample_path)
         st.success(f"Loaded packaged sample_data.csv; shape: {df.shape}")
     else:
-        st.error("Sample data missing from package. Please add sample_data.csv.")
+        st.error("Sample data missing. Please place sample_data.csv in app folder.")
 
 # ---------- Safe run functions ----------
 def safe_run_dataops(df):
-    if st.session_state.get("is_processing_dataops", False):
-        st.warning("DataOps pipeline already running — please wait.")
-        return st.session_state.get("results_dataops")
+    if st.session_state["is_processing"]:
+        st.warning("Pipeline already running — please wait.")
+        return None
     try:
-        st.session_state["is_processing_dataops"] = True
+        st.session_state["is_processing"] = True
         results = run_pipeline(df)
-        st.session_state["results_dataops"] = results
-        st.session_state["last_run_dataops"] = results.get("run_ts") or datetime.now().isoformat()
+        st.session_state["last_run_dataops"] = results.get("run_ts", datetime.now().isoformat())
         return results
     finally:
-        st.session_state["is_processing_dataops"] = False
+        st.session_state["is_processing"] = False
 
 def safe_run_ml(df):
-    if st.session_state.get("is_processing_ml", False):
-        st.warning("ML pipeline already running — please wait.")
-        return st.session_state.get("results_ml")
+    if st.session_state["is_processing"]:
+        st.warning("Pipeline already running — please wait.")
+        return None
     try:
-        st.session_state["is_processing_ml"] = True
+        st.session_state["is_processing"] = True
         results = run_ml_pipeline(df)
-        st.session_state["results_ml"] = results
-        st.session_state["last_run_ml"] = results.get("run_ts") or datetime.now().isoformat()
+        st.session_state["last_run_ml"] = results.get("run_ts", datetime.now().isoformat())
         return results
     finally:
-        st.session_state["is_processing_ml"] = False
+        st.session_state["is_processing"] = False
 
-# ---------- Manual run buttons ----------
+# ---------- Buttons ----------
 col1, col2 = st.columns(2)
-dataops_results = ml_results = None
-with col1:
-    if st.button("▶️ Run DataOps Pipeline"):
-        if df is not None:
-            dataops_results = safe_run_dataops(df)
-        else:
-            st.warning("Upload a CSV first.")
-with col2:
-    if st.button("▶️ Run ML Pipeline"):
-        if df is not None:
-            ml_results = safe_run_ml(df)
-        else:
-            st.warning("Upload a CSV first.")
+run_dataops = col1.button("▶️ Run DataOps Pipeline")
+run_ml = col2.button("▶️ Run ML Pipeline")
 
-# ---------- Auto-run if never run ----------
+# ---------- Run pipelines ----------
+dataops_results = None
+ml_results = None
+
 if df is not None:
-    if st.session_state["results_dataops"] is None:
-        dataops_results = safe_run_dataops(df)
-    else:
-        dataops_results = st.session_state["results_dataops"]
+    if run_dataops:
+        with st.spinner("Running DataOps pipeline..."):
+            dataops_results = safe_run_dataops(df)
+    if run_ml:
+        with st.spinner("Running ML pipeline..."):
+            ml_results = safe_run_ml(df)
+else:
+    st.info("Please upload a CSV file or enable 'Use packaged sample dataset'.")
 
-    if st.session_state["results_ml"] is None:
-        ml_results = safe_run_ml(df)
-    else:
-        ml_results = st.session_state["results_ml"]
-
-# ---------- Display DataOps Results ----------
+# ---------- Display DataOps results ----------
 if dataops_results:
-    st.markdown("---")
-    st.header("💠 DataOps Pipeline Results")
-
     if "error" in dataops_results:
         st.error(f"DataOps pipeline error: {dataops_results['error']}")
     else:
+        st.header("📊 DataOps Pipeline Results")
+        # 1️⃣ Summary
         st.subheader("1️⃣ Summary Statistics")
         try:
             st.dataframe(pd.DataFrame(dataops_results["summary"]))
-        except Exception:
+        except:
             st.write(dataops_results.get("summary"))
 
+        # 2️⃣ Missing
         st.subheader("2️⃣ Missing Values")
         st.json(dataops_results.get("missing", {}))
 
+        # 3️⃣ Data types
         st.subheader("3️⃣ Data Types")
         st.json(dataops_results.get("dtypes", {}))
 
-        st.subheader("4️⃣ Charts / Visualizations")
-        images = [
-            "correlation_heatmap.png",
-            "class_distribution.png",
-            "feature_importance.png",
-            "univariate_plot.png",
-            "bivariate_plot.png"
-        ]
+        # 4️⃣ Charts
+        st.subheader("4️⃣ Charts & Plots")
+        images = ["correlation_heatmap.png", "class_distribution.png",
+                  "feature_importance.png", "univariate_plot.png", "bivariate_plot.png"]
         cols = st.columns(2)
         for i, img in enumerate(images):
             p = Path(img)
@@ -145,26 +131,26 @@ if dataops_results:
                 with cols[i % 2]:
                     st.write(f"ℹ️ {img} not available for this run.")
 
+        # 5️⃣ Logs
         st.subheader("5️⃣ DataOps Logs")
         st.text_area("📜 data_pipeline.log", value=dataops_results.get("logs", ""), height=240)
 
-# ---------- Display ML Pipeline Results ----------
+# ---------- Display ML results ----------
 if ml_results:
-    st.markdown("---")
-    st.header("💠 ML Pipeline Results")
     if "error" in ml_results:
         st.error(f"ML pipeline error: {ml_results['error']}")
     else:
-        st.subheader("1️⃣ Selected Models: Logistic Regression & Random Forest")
+        st.header("🤖 ML Pipeline Results")
+        st.subheader("Selected Models: Logistic Regression & Random Forest")
         st.write("📊 Evaluation Metrics:")
         st.json(ml_results.get("metrics", {}))
-
-        st.subheader("2️⃣ ML Pipeline Logs")
-        st.text_area("📜 ml_pipeline.log", value=ml_results.get("logs", ""), height=240)
+        st.subheader("ML Logs")
+        st.text_area("📜 ML Pipeline Logs", value=ml_results.get("logs", ""), height=240)
 
 # ---------- Application Insights ----------
 st.markdown("---")
 st.header("🧭 Application Insights")
+import platform, sys
 app_details = {
     "Application Name": "Credit Card Fraud Dashboard",
     "Deployed Environment": os.getenv("STREAMLIT_SERVER_ADDRESS", "Local/Streamlit Cloud"),

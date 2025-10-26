@@ -1,10 +1,11 @@
+# data_pipeline.py
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import RandomForestClassifier
-import logging
+import seaborn as sns
+from sklearn.preprocessing import MinMaxScaler
 from datetime import datetime
+import logging
 
 # Setup logging
 logging.basicConfig(filename="data_pipeline.log", level=logging.INFO,
@@ -15,87 +16,83 @@ def run_pipeline(df: pd.DataFrame):
     try:
         df = df.copy()
         logging.info("=== DataOps Pipeline started ===")
-        result["run_ts"] = datetime.now().isoformat()
 
-        # Summary
-        result["summary"] = df.describe(include="all").T
+        # 1️⃣ Summary statistics
+        summary = df.describe().transpose()
+        result["summary"] = summary.to_dict()
+        logging.info("Summary statistics computed.")
 
-        # Data types
+        # 2️⃣ Missing values
+        missing = df.isnull().sum().to_dict()
+        result["missing"] = missing
+        logging.info("Missing values checked.")
+
+        # 3️⃣ Data types
         result["dtypes"] = df.dtypes.apply(str).to_dict()
 
-        # Missing values
-        result["missing"] = df.isnull().sum().to_dict()
+        # 4️⃣ Normalization
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        scaler = MinMaxScaler()
+        df[numeric_cols] = scaler.fit_transform(df[numeric_cols])
+        logging.info("Data normalized.")
 
-        # Impute numeric missing values
-        num_cols = df.select_dtypes(include=[np.number]).columns
-        df[num_cols] = df[num_cols].fillna(df[num_cols].mean())
-
-        # Normalize Amount column
-        if "Amount" in df.columns:
-            df["normalized_amount"] = StandardScaler().fit_transform(df[["Amount"]])
-            logging.info("'Amount' normalized")
-
-        # Correlation heatmap
-        plt.figure(figsize=(8,6))
-        corr = df.corr(numeric_only=True)
-        plt.imshow(corr, cmap="coolwarm", interpolation="nearest")
-        plt.colorbar()
-        plt.title("Correlation Heatmap")
-        plt.savefig("correlation_heatmap.png", bbox_inches="tight")
+        # 5️⃣ Univariate plots
+        plt.figure(figsize=(10,6))
+        df[numeric_cols].hist(bins=30, figsize=(12,8))
+        plt.tight_layout()
+        plt.savefig("univariate_plot.png")
         plt.close()
 
-        # Class distribution
+        # 6️⃣ Bivariate plot (correlation heatmap)
+        plt.figure(figsize=(10,8))
+        sns.heatmap(df[numeric_cols].corr(), annot=True, cmap="coolwarm")
+        plt.tight_layout()
+        plt.savefig("bivariate_plot.png")
+        plt.close()
+
+        # 7️⃣ Class distribution (Fraud vs Non-Fraud)
         if "Class" in df.columns:
-            plt.figure()
-            df["Class"].value_counts().plot(kind="bar")
-            plt.title("Class Distribution (0=Normal,1=Fraud)")
-            plt.savefig("fraud_vs_nonfraud.png", bbox_inches="tight")
+            plt.figure(figsize=(6,4))
+            sns.countplot(x="Class", data=df)
+            plt.title("Fraud vs Non-Fraud")
+            plt.savefig("class_distribution.png")
             plt.close()
 
-        # Feature importance
+        # 8️⃣ Feature importance (simple correlation with target)
         if "Class" in df.columns:
-            X = df.drop("Class", axis=1).select_dtypes(include=[np.number])
-            y = df["Class"]
-            if len(y.unique()) > 1:
-                model = RandomForestClassifier(n_estimators=50, random_state=42)
-                model.fit(X, y)
-                imp = pd.Series(model.feature_importances_, index=X.columns).sort_values(ascending=False)
-                imp.head(10).plot(kind="barh")
-                plt.title("Top 10 Feature Importances")
-                plt.gca().invert_yaxis()
-                plt.savefig("feature_importance.png", bbox_inches="tight")
-                plt.close()
-                result["feature_importance"] = imp.head(10).to_dict()
-
-        # Univariate plots (numeric columns)
-        for col in num_cols[:5]:  # limit for demo
-            plt.figure()
-            df[col].hist(bins=30)
-            plt.title(f"Histogram of {col}")
-            plt.savefig(f"univariate_{col}.png", bbox_inches="tight")
+            corr_with_target = df.corr()["Class"].drop("Class").sort_values(ascending=False)
+            plt.figure(figsize=(10,4))
+            sns.barplot(x=corr_with_target.index, y=corr_with_target.values)
+            plt.title("Feature Importance (Correlation with Class)")
+            plt.xticks(rotation=45)
+            plt.tight_layout()
+            plt.savefig("feature_importance.png")
             plt.close()
 
-        # Bivariate plots (numeric vs numeric)
-        if len(num_cols) >= 2:
-            plt.figure()
-            plt.scatter(df[num_cols[0]], df[num_cols[1]], alpha=0.5)
-            plt.xlabel(num_cols[0])
-            plt.ylabel(num_cols[1])
-            plt.title(f"Bivariate Plot: {num_cols[0]} vs {num_cols[1]}")
-            plt.savefig("bivariate_plot.png", bbox_inches="tight")
-            plt.close()
+        # 9️⃣ Correlation heatmap saved separately
+        plt.figure(figsize=(10,8))
+        sns.heatmap(df.corr(), annot=True, cmap="coolwarm")
+        plt.tight_layout()
+        plt.savefig("correlation_heatmap.png")
+        plt.close()
 
-        # Read logs
+        # 10️⃣ Logging
         try:
             with open("data_pipeline.log", "r") as f:
                 result["logs"] = f.read()[-5000:]
         except:
             result["logs"] = ""
 
+        result["run_ts"] = datetime.now().isoformat()
         logging.info("=== DataOps Pipeline completed ===")
         return result
 
     except Exception as e:
         logging.exception("DataOps pipeline failed.")
         result["error"] = str(e)
+        try:
+            with open("data_pipeline.log", "r") as f:
+                result["logs"] = f.read()[-5000:]
+        except:
+            result["logs"] = ""
         return result
