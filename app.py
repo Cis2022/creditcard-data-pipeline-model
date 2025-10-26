@@ -13,6 +13,7 @@ from data_pipeline import run_pipeline
 from streamlit_autorefresh import st_autorefresh
 import os
 from datetime import datetime
+from ml_pipeline import run_ml_pipeline
 
 # ---------- Auto-refresh configuration ----------
 # Re-run script every 120000 ms (2 minutes)
@@ -98,6 +99,7 @@ if df is not None:
     if should_run:
         with st.spinner("Processing pipeline..."):
             results = safe_run(df)
+            ml_results = run_ml_pipeline(df)
     else:
         results = None
         st.info("Waiting for scheduled run (or click 'Run pipeline now').")
@@ -136,8 +138,17 @@ if df is not None:
                     with cols[i % 2]:
                         st.write(f"ℹ️ {img} not available for this run.")
 
-            st.header("6️⃣ Pipeline Logs")
-            st.text_area("📜 data_pipeline.log", value=results.get("logs", ""), height=240)
+                st.header("6️⃣ Pipeline Logs")
+        st.text_area("📜 data_pipeline.log", value=results.get("logs", ""), height=240)
+
+        if ml_results:
+            st.header("7️⃣ ML Model Evaluation")
+            st.subheader("Selected Models: Logistic Regression & Random Forest")
+            st.write("📊 Evaluation Metrics:")
+            st.json(ml_results.get("metrics", {}))
+
+            st.subheader("📁 Model Logs")
+            st.text_area("ML Pipeline Logs", value=ml_results.get("logs", ""), height=240)
 
             st.markdown("---")
             st.header("🧭 Application Insights")
