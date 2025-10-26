@@ -7,41 +7,51 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 import logging
 from datetime import datetime
 
-# Setup logging
-logging.basicConfig(filename="ml_pipeline.log", level=logging.INFO,
-                    format="%(asctime)s - %(levelname)s - %(message)s")
+# Create a custom logger for ML pipeline
+ml_logger = logging.getLogger("ml_pipeline")
+ml_logger.setLevel(logging.INFO)
+
+# Create file handler
+ml_handler = logging.FileHandler("ml_pipeline.log")
+ml_handler.setLevel(logging.INFO)
+
+# Create formatter and add to handler
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+ml_handler.setFormatter(formatter)
+
+# Avoid duplicate logs
+if not ml_logger.handlers:
+    ml_logger.addHandler(ml_handler)
 
 def run_ml_pipeline(df: pd.DataFrame):
     result = {}
     try:
         df = df.copy()
-        logging.info("=== ML Pipeline started ===")
+        ml_logger.info("=== ML Pipeline started ===")
 
-        # Check if target column exists
         if "Class" not in df.columns:
             raise ValueError("Target column 'Class' not found in dataset.")
-        logging.info("Target column 'Class' found.")
+        ml_logger.info("Target column 'Class' found.")
 
-        # Prepare features and target
         X = df.drop("Class", axis=1).select_dtypes(include=[np.number]).fillna(0)
         y = df["Class"].fillna(0)
+        if isinstance(y, pd.DataFrame):
+            y = y.squeeze()
+        y = y.astype(int)
+        ml_logger.info(f"Target y type: {type(y)}, shape: {y.shape}, unique values: {y.unique().tolist()}")
 
-        # Check if target has at least two classes
         if len(y.unique()) < 2:
             raise ValueError("Target column must have at least two classes.")
-        logging.info("Target column has sufficient class diversity.")
+        ml_logger.info("Target column has sufficient class diversity.")
 
-        # Split data
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=42)
-        logging.info(f"Data split into train and test sets: Train={len(X_train)}, Test={len(X_test)}")
+        ml_logger.info(f"Data split into train and test sets: Train={len(X_train)}, Test={len(X_test)}")
 
-        # Define models
         models = {
             "Logistic Regression": LogisticRegression(max_iter=1000),
             "Random Forest": RandomForestClassifier(n_estimators=100, random_state=42)
         }
 
-        # Train and evaluate
         metrics = {}
         for name, model in models.items():
             model.fit(X_train, y_train)
@@ -52,12 +62,11 @@ def run_ml_pipeline(df: pd.DataFrame):
                 "Recall": round(recall_score(y_test, y_pred), 4),
                 "F1 Score": round(f1_score(y_test, y_pred), 4)
             }
-            logging.info(f"{name} trained and evaluated successfully.")
-            logging.info(f"{name} Metrics: {metrics[name]}")
+            ml_logger.info(f"{name} trained and evaluated successfully.")
+            ml_logger.info(f"{name} Metrics: {metrics[name]}")
 
         result["metrics"] = metrics
 
-        # Read logs
         try:
             with open("ml_pipeline.log", "r") as f:
                 result["logs"] = f.read()[-5000:]
@@ -65,11 +74,11 @@ def run_ml_pipeline(df: pd.DataFrame):
             result["logs"] = ""
 
         result["run_ts"] = datetime.now().isoformat()
-        logging.info("=== ML Pipeline completed ===")
+        ml_logger.info("=== ML Pipeline completed ===")
         return result
 
     except Exception as e:
-        logging.exception("ML pipeline failed.")
+        ml_logger.exception("ML pipeline failed.")
         result["error"] = str(e)
         try:
             with open("ml_pipeline.log", "r") as f:
