@@ -5,12 +5,14 @@ from pathlib import Path
 import glob
 from streamlit_autorefresh import st_autorefresh
 
-# Auto-refresh every 2 minutes
+# --- Auto-refresh every 2 minutes ---
 st_autorefresh(interval=120000, limit=None, key="refresh")
 
+# --- Page setup ---
 st.set_page_config(page_title="Credit Card Fraud DataOps", layout="wide")
 st.title("💳 Credit Card Fraud DataOps Dashboard")
 
+# --- File uploader ---
 uploaded_file = st.file_uploader("📂 Upload your creditcard.csv file", type=["csv"])
 
 if uploaded_file:
@@ -35,14 +37,15 @@ if uploaded_file:
         st.json(results["dtypes"])
 
     st.subheader("5️⃣ Univariate Analysis")
-    for img in glob.glob("plots/univariate/*.png"):
+    for img in sorted(glob.glob("plots/univariate/*.png")):
         st.image(img, caption=Path(img).name, use_container_width=True)
 
     st.subheader("6️⃣ Bivariate Analysis")
-    for img in glob.glob("plots/bivariate/*.png"):
+    for img in sorted(glob.glob("plots/bivariate/*.png")):
         st.image(img, caption=Path(img).name, use_container_width=True)
 
     st.subheader("7️⃣ Pipeline Logs")
     st.text_area("Logs", results["logs"], height=250)
+
 else:
     st.info("Please upload the CSV file to start the automated DataOps pipeline.")
