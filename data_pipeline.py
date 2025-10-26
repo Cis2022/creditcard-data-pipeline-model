@@ -20,51 +20,57 @@ from sklearn.ensemble import RandomForestClassifier
 import logging, time, os
 from datetime import datetime
 
-# Setup logging
-logging.basicConfig(filename="data_pipeline.log", level=logging.INFO,
-                    format="%(asctime)s - %(levelname)s - %(message)s")
+# Create a custom logger for Data Pipeline
+data_logger = logging.getLogger("data_pipeline")
+data_logger.setLevel(logging.INFO)
+
+# Create file handler
+handler = logging.FileHandler("data_pipeline.log")
+handler.setLevel(logging.INFO)
+
+# Create formatter and add to handler
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+handler.setFormatter(formatter)
+
+# Avoid duplicate handlers
+if not data_logger.handlers:
+    data_logger.addHandler(handler)
 
 def run_pipeline(df: pd.DataFrame):
     start = time.time()
-    logging.info("=== Pipeline started ===")
+    data_logger.info("=== Pipeline started ===")
     result = {}
     try:
-        # Make a copy to avoid side-effects
         df = df.copy()
 
-        # 1) Summary & dtypes
         summary = df.describe(include="all")
         result["summary"] = summary.fillna("").to_dict()
         result["dtypes"] = df.dtypes.astype(str).to_dict()
-        logging.info("Computed summary and dtypes.")
+        data_logger.info("Computed summary and dtypes.")
 
-        # 2) Missing values and impute numeric
         missing = df.isnull().sum()
         result["missing"] = missing.to_dict()
         num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
         if len(num_cols) > 0:
             df[num_cols] = df[num_cols].fillna(df[num_cols].mean())
-            logging.info("Imputed numeric missing values with column means.")
+            data_logger.info("Imputed numeric missing values with column means.")
 
-        # 3) Normalization
         if "Amount" in df.columns:
             try:
                 scaler = StandardScaler()
                 df["normalized_amount"] = scaler.fit_transform(df[["Amount"]])
-                logging.info("Normalized 'Amount' and stored in 'normalized_amount'.")
+                data_logger.info("Normalized 'Amount' and stored in 'normalized_amount'.")
             except Exception as e:
-                logging.exception("Normalization failed for 'Amount'.")
+                data_logger.exception("Normalization failed for 'Amount'.")
         else:
-            # create normalized versions for numeric columns with prefix norm_
             if len(num_cols) > 0:
                 scaler = StandardScaler()
                 normalized = scaler.fit_transform(df[num_cols])
                 for i, col in enumerate(num_cols):
                     new_col = f"norm_{col}"
                     df[new_col] = normalized[:, i]
-                logging.info("Normalized numeric columns to 'norm_' prefix.")
+                data_logger.info("Normalized numeric columns to 'norm_' prefix.")
 
-        # 4) Correlation heatmap (numeric only)
         try:
             corr = df.select_dtypes(include=[np.number]).corr()
             if corr.size > 0:
@@ -77,11 +83,10 @@ def run_pipeline(df: pd.DataFrame):
                 plt.tight_layout()
                 plt.savefig("correlation_heatmap.png", bbox_inches="tight")
                 plt.close()
-                logging.info("Saved correlation_heatmap.png")
+                data_logger.info("Saved correlation_heatmap.png")
         except Exception:
-            logging.exception("Failed to create correlation heatmap.")
+            data_logger.exception("Failed to create correlation heatmap.")
 
-        # 5) Class distribution
         if "Class" in df.columns:
             try:
                 counts = df["Class"].value_counts()
@@ -93,11 +98,10 @@ def run_pipeline(df: pd.DataFrame):
                 plt.tight_layout()
                 plt.savefig("class_distribution.png", bbox_inches="tight")
                 plt.close()
-                logging.info("Saved class_distribution.png")
+                data_logger.info("Saved class_distribution.png")
             except Exception:
-                logging.exception("Failed to save class distribution.")
+                data_logger.exception("Failed to save class distribution.")
 
-        # 6) Univariate & Bivariate plots (pick first numeric cols)
         if len(num_cols) >= 1:
             try:
                 plt.figure(figsize=(6,4))
@@ -106,9 +110,9 @@ def run_pipeline(df: pd.DataFrame):
                 plt.tight_layout()
                 plt.savefig("univariate_plot.png", bbox_inches="tight")
                 plt.close()
-                logging.info("Saved univariate_plot.png")
+                data_logger.info("Saved univariate_plot.png")
             except Exception:
-                logging.exception("Failed univariate plot.")
+                data_logger.exception("Failed univariate plot.")
 
         if len(num_cols) >= 2:
             try:
@@ -119,11 +123,10 @@ def run_pipeline(df: pd.DataFrame):
                 plt.tight_layout()
                 plt.savefig("bivariate_plot.png", bbox_inches="tight")
                 plt.close()
-                logging.info("Saved bivariate_plot.png")
+                data_logger.info("Saved bivariate_plot.png")
             except Exception:
-                logging.exception("Failed bivariate plot.")
+                data_logger.exception("Failed bivariate plot.")
 
-        # 7) Feature importance (if Class exists and data okay)
         if "Class" in df.columns:
             try:
                 X = df.drop("Class", axis=1).select_dtypes(include=[np.number]).fillna(0)
@@ -141,18 +144,16 @@ def run_pipeline(df: pd.DataFrame):
                     plt.savefig("feature_importance.png", bbox_inches="tight")
                     plt.close()
                     result["feature_importance"] = topk.to_dict()
-                    logging.info("Saved feature_importance.png")
+                    data_logger.info("Saved feature_importance.png")
                 else:
-                    logging.info("Feature importance skipped (no numeric features or only one class).")
+                    data_logger.info("Feature importance skipped (no numeric features or only one class).")
             except Exception:
-                logging.exception("Feature importance generation failed.")
+                data_logger.exception("Feature importance generation failed.")
 
-        # 8) Finalize and return results
         end = time.time()
         elapsed = round(end - start, 2)
-        logging.info(f"Pipeline completed in {elapsed} seconds")
+        data_logger.info(f"Pipeline completed in {elapsed} seconds")
 
-        # read last logs
         try:
             with open("data_pipeline.log", "r") as f:
                 logs = f.read()
@@ -165,8 +166,7 @@ def run_pipeline(df: pd.DataFrame):
         return result
 
     except Exception as e:
-        logging.exception("Pipeline failed")
-        # ensure logs available
+        data_logger.exception("Pipeline failed")
         with open("data_pipeline.log", "a") as f:
             f.write(f"{datetime.now().isoformat()} - ERROR - {str(e)}\n")
         return {"error": str(e), "logs": open("data_pipeline.log").read(), "run_ts": datetime.now().isoformat()}

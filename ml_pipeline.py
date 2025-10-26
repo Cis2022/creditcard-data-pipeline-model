@@ -29,6 +29,11 @@ def run_ml_pipeline(df: pd.DataFrame):
         df = df.copy()
         ml_logger.info("=== ML Pipeline started ===")
 
+        # Optional: Sample smaller data for memory efficiency
+        if len(df) > 20000:
+            df = df.sample(n=20000, random_state=42)
+            ml_logger.info("Sampled 20,000 rows from dataset for memory efficiency.")
+
         if "Class" not in df.columns:
             raise ValueError("Target column 'Class' not found in dataset.")
         ml_logger.info("Target column 'Class' found.")
@@ -48,7 +53,7 @@ def run_ml_pipeline(df: pd.DataFrame):
         ml_logger.info(f"Data split into train and test sets: Train={len(X_train)}, Test={len(X_test)}")
 
         models = {
-            "Logistic Regression": LogisticRegression(max_iter=1000),
+            "Logistic Regression": LogisticRegression(max_iter=1000, solver='saga', n_jobs=1),
             "Random Forest": RandomForestClassifier(n_estimators=100, random_state=42)
         }
 
